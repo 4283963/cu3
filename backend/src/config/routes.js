@@ -59,6 +59,12 @@ const routeConfig = {
       meta: { title: '机位预约', icon: 'Location', requiresAuth: true }
     },
     {
+      path: '/blind-config',
+      name: 'BlindConfig',
+      component: 'BlindConfig',
+      meta: { title: '掩体配置', icon: 'SetUp', requiresAuth: true }
+    },
+    {
       path: '/my-bookings',
       name: 'MyBookings',
       component: 'MyBookings',
@@ -89,6 +95,12 @@ const routeConfig = {
       name: 'Blinds',
       component: 'Blinds',
       meta: { title: '机位预约', icon: 'Location', requiresAuth: true }
+    },
+    {
+      path: '/blind-config',
+      name: 'BlindConfig',
+      component: 'BlindConfig',
+      meta: { title: '掩体配置', icon: 'SetUp', requiresAuth: true }
     },
     {
       path: '/my-bookings',

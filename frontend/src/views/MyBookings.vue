@@ -12,7 +12,7 @@
       <el-tab-pane label="全部预约" name="all">
         <el-table
           :data="filteredBookings"
-          v-loading="bookingStore.loading"
+          v-loading="bookingStore.loading.bookings || bookingStore.loading.cancelBooking"
           style="width: 100%"
           empty-text="暂无预约记录"
         >
@@ -83,7 +83,7 @@
             </el-card>
           </el-col>
           <el-empty
-            v-if="!bookingStore.loading && bookingStore.confirmedBookings.length === 0"
+            v-if="!bookingStore.loading.bookings && bookingStore.confirmedBookings.length === 0"
             description="暂无已确认的预约"
           />
         </el-row>
@@ -92,7 +92,7 @@
       <el-tab-pane :label="`已取消 (${bookingStore.cancelledBookings.length})`" name="cancelled">
         <el-table
           :data="bookingStore.cancelledBookings"
-          v-loading="bookingStore.loading"
+          v-loading="bookingStore.loading.bookings"
           style="width: 100%"
           empty-text="暂无已取消的预约"
         >

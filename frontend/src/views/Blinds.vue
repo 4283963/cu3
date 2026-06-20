@@ -5,7 +5,7 @@
       <p class="page-desc">根据您的会员等级，系统为您展示可预约的机位及时段</p>
     </div>
 
-    <el-row :gutter="20" v-loading="bookingStore.loading">
+    <el-row :gutter="20" v-loading="bookingStore.loading.blinds">
       <el-col :span="8" v-for="blind in bookingStore.blinds" :key="blind.id">
         <el-card shadow="hover" class="blind-card">
           <img :src="blind.image" :alt="blind.name" class="blind-image" />
@@ -47,7 +47,7 @@
     </el-row>
 
     <el-empty
-      v-if="!bookingStore.loading && bookingStore.blinds.length === 0"
+      v-if="!bookingStore.loading.blinds && bookingStore.blinds.length === 0"
       description="暂无可用机位，请升级会员等级解锁更多机位"
     />
 

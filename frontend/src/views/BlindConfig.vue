@@ -132,9 +132,22 @@
               <el-button type="primary" @click="handleSave">
                 <el-icon><Check /></el-icon>保存配置
               </el-button>
+              <el-button type="success" @click="handleExport">
+                <el-icon><Download /></el-icon>导出配置
+              </el-button>
+              <el-button type="warning" @click="handleImportClick">
+                <el-icon><Upload /></el-icon>导入配置
+              </el-button>
               <el-button @click="handleReset">
                 <el-icon><Refresh /></el-icon>重置
               </el-button>
+              <input
+                ref="fileInputRef"
+                type="file"
+                accept=".bpc,.json"
+                style="display: none;"
+                @change="handleFileChange"
+              />
             </el-form-item>
           </el-form>
         </el-card>
@@ -243,12 +256,107 @@
         </el-card>
       </el-col>
     </el-row>
+
+    <el-dialog
+      v-model="importDialogVisible"
+      title="导入配置文件"
+      width="520px"
+      :close-on-click-modal="false"
+      @closed="resetImportState"
+    >
+      <div v-if="importLoading" class="import-loading">
+        <el-icon class="loading-icon"><Loading /></el-icon>
+        <p>正在解析配置文件...</p>
+      </div>
+
+      <div v-else-if="importResult" class="import-result">
+        <el-result
+          :icon="importResult.valid ? 'success' : 'error'"
+          :title="importResult.valid ? '配置解析成功' : '配置解析失败'"
+          :sub-title="importResult.valid ? '确认以下配置信息后点击导入' : importResult.errors?.[0]"
+        >
+          <template v-if="importResult.valid" #extra>
+            <div class="import-preview">
+              <el-descriptions :column="1" border size="small">
+                <el-descriptions-item label="机位名称">
+                  {{ importData.name || '未命名' }}
+                </el-descriptions-item>
+                <el-descriptions-item label="机位编号">
+                  {{ importData.code || '-' }}
+                </el-descriptions-item>
+                <el-descriptions-item label="最低会员等级">
+                  <el-tag :type="getLevelTagType(importData.minLevel)" size="small">
+                    {{ getLevelName(importData.minLevel) }}
+                  </el-tag>
+                </el-descriptions-item>
+                <el-descriptions-item label="时段数量">
+                  {{ importData.timeSlots?.length || 0 }} 个
+                </el-descriptions-item>
+                <el-descriptions-item label="文件版本">
+                  v{{ importMeta.version }}
+                </el-descriptions-item>
+                <el-descriptions-item label="导出时间">
+                  {{ formatTimestamp(importMeta.timestamp) }}
+                </el-descriptions-item>
+              </el-descriptions>
+
+              <div v-if="importResult.warnings?.length" class="import-warnings">
+                <el-alert
+                  :title="`有 ${importResult.warnings.length} 条警告`"
+                  type="warning"
+                  :closable="false"
+                  show-icon
+                >
+                  <template #default>
+                    <ul>
+                      <li v-for="(w, i) in importResult.warnings" :key="i">
+                        {{ w }}
+                      </li>
+                    </ul>
+                  </template>
+                </el-alert>
+              </div>
+            </div>
+          </template>
+        </el-result>
+      </div>
+
+      <div v-else class="import-tip">
+        <el-icon class="tip-icon"><Upload /></el-icon>
+        <p>支持 <strong>.bpc</strong> 专用配置文件和 <strong>.json</strong> 格式</p>
+        <p class="tip-sub">选择文件后将自动解析并预览配置内容</p>
+      </div>
+
+      <template #footer>
+        <el-button @click="importDialogVisible = false">取消</el-button>
+        <el-button
+          v-if="importResult?.valid"
+          type="primary"
+          @click="confirmImport"
+        >
+          确认导入
+        </el-button>
+        <el-button
+          v-else
+          type="primary"
+          @click="handleImportClick"
+        >
+          选择文件
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, watch } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
+import {
+  downloadConfigFile,
+  readConfigFile,
+  validateConfigData,
+  migrateConfig
+} from '@/utils/blindConfig';
 
 const defaultSlotsByMode = {
   STANDARD: [
@@ -418,6 +526,125 @@ const handleSave = () => {
 const handleReset = () => {
   Object.assign(form, createDefaultForm());
   ElMessage.info('已重置为默认配置');
+};
+
+const fileInputRef = ref(null);
+const importDialogVisible = ref(false);
+const importLoading = ref(false);
+const importResult = ref(null);
+const importData = ref(null);
+const importMeta = ref(null);
+
+const handleExport = () => {
+  if (!form.name) {
+    ElMessage.warning('请先填写机位名称');
+    return;
+  }
+  
+  try {
+    const configData = JSON.parse(generatedJson.value);
+    const filename = `blind-${form.code || 'config'}_${new Date().toISOString().split('T')[0]}.bpc`;
+    downloadConfigFile(configData, filename);
+    ElMessage.success('配置文件已导出');
+  } catch (e) {
+    console.error('导出失败:', e);
+    ElMessage.error('导出失败：' + e.message);
+  }
+};
+
+const handleImportClick = () => {
+  if (!importResult.value) {
+    fileInputRef.value?.click();
+  } else {
+    importDialogVisible.value = true;
+  }
+};
+
+const handleFileChange = async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+
+  importDialogVisible.value = true;
+  importLoading.value = true;
+  importResult.value = null;
+  importData.value = null;
+  importMeta.value = null;
+
+  try {
+    const result = await readConfigFile(file);
+    const migrated = migrateConfig(result.data, result.version);
+    const validation = validateConfigData(migrated);
+
+    importMeta.value = {
+      version: result.version,
+      timestamp: result.timestamp,
+      filename: file.name
+    };
+    importData.value = migrated;
+    importResult.value = validation;
+
+    if (!validation.valid) {
+      ElMessage.error('配置文件无效：' + validation.errors[0]);
+    }
+  } catch (e) {
+    console.error('导入失败:', e);
+    importResult.value = {
+      valid: false,
+      errors: [e.message || '文件解析失败'],
+      warnings: []
+    };
+    ElMessage.error('导入失败：' + e.message);
+  } finally {
+    importLoading.value = false;
+    if (fileInputRef.value) {
+      fileInputRef.value.value = '';
+    }
+  }
+};
+
+const confirmImport = async () => {
+  if (!importData.value) return;
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要导入机位【${importData.value.name || '未命名'}】的配置吗？\n当前未保存的配置将被覆盖。`,
+      '确认导入',
+      { type: 'warning', confirmButtonText: '确认导入', cancelButtonText: '取消' }
+    );
+
+    const data = importData.value;
+    form.code = data.code || '';
+    form.name = data.name || '';
+    form.type = data.type || 'WATERFOWL';
+    form.minLevel = data.minLevel || 'BASIC';
+    form.slotMode = data.slotMode || 'CUSTOM';
+    form.basePrice = data.basePrice || 0;
+    form.autoPrice = data.autoPrice || false;
+    form.location = data.location || '';
+    form.features = data.features || [];
+    form.timeSlots = data.timeSlots?.length 
+      ? JSON.parse(JSON.stringify(data.timeSlots))
+      : [{ id: 't1', label: '新时段', start: '00:00', end: '00:00', price: 0 }];
+
+    importDialogVisible.value = false;
+    ElMessage.success('配置导入成功！');
+  } catch (e) {
+    if (e !== 'cancel' && e?.action !== 'cancel') {
+      console.error('导入确认失败:', e);
+    }
+  }
+};
+
+const resetImportState = () => {
+  importLoading.value = false;
+  importResult.value = null;
+  importData.value = null;
+  importMeta.value = null;
+};
+
+const formatTimestamp = (ts) => {
+  if (!ts) return '-';
+  return new Date(ts).toLocaleString('zh-CN');
 };
 </script>
 
@@ -597,5 +824,76 @@ const handleReset = () => {
   font-size: 12px;
   line-height: 1.6;
   margin: 0;
+}
+
+.import-loading {
+  text-align: center;
+  padding: 40px 20px;
+}
+
+.loading-icon {
+  font-size: 48px;
+  color: #409eff;
+  animation: spin 1s linear infinite;
+  margin-bottom: 16px;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.import-loading p {
+  color: #606266;
+  margin: 0;
+}
+
+.import-result {
+  padding: 10px 0;
+}
+
+.import-preview {
+  margin-top: 16px;
+}
+
+.import-warnings {
+  margin-top: 16px;
+}
+
+.import-warnings ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  text-align: left;
+}
+
+.import-warnings li {
+  font-size: 13px;
+  line-height: 1.8;
+  color: #e6a23c;
+}
+
+.import-tip {
+  text-align: center;
+  padding: 40px 20px;
+}
+
+.tip-icon {
+  font-size: 56px;
+  color: #c0c4cc;
+  margin-bottom: 16px;
+}
+
+.import-tip p {
+  margin: 0 0 8px;
+  color: #606266;
+}
+
+.import-tip p strong {
+  color: #409eff;
+}
+
+.tip-sub {
+  font-size: 13px;
+  color: #909399 !important;
 }
 </style>
